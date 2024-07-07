@@ -42,6 +42,8 @@ The package `brownian_motion` contains a node that makes a wheeled robot executi
     - Display verbose logging messages
 - `useLRF` (boolean, default: true)
     - If true, use laser rangefinder data rather than sonar data. If false, use sonar data instead.
+- `use_all_LRF_readings` (boolean, default: false)
+    - If true, use all laser rangefinder data without downsampling. Downsampling potentially decreases computational cost but degrades navigation safety.
 
 ##### `c_brownian_motion`
 The node `c_brownian_motion` is identical to `brownian_motion`: same topics, parameter and  behavior.
