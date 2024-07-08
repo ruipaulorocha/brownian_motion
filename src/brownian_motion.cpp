@@ -41,7 +41,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
-#include <stdlib.h>
 
 //#include "ros/ros.h"
 #include <rclcpp/rclcpp.hpp>
@@ -471,14 +470,14 @@ void BrownianMotionNode::scanReceived_no_downsampling(const sensor_msgs::msg::La
 	}
 	
 	if (!recover){
-		idxMinDist = 0;
+		idxMinDist = -1;
 		nsmalldist = 0;
 		wl = 0.0; wr = 0.0;
 		angle = pt->angle_min;
 		for (int i = 0; i < nreads; i++){
-			if (angle >= -M_PI && angle <= M_PI){
+			if (angle >= -M_PI/2.0 && angle <= M_PI/2.0){// && pt->ranges[i] > MINDIST){
 				// minimum distance
-				if (i > 0 && pt->ranges[i] < pt->ranges[idxMinDist])
+				if (idxMinDist < 0 || (pt->ranges[i] < pt->ranges[idxMinDist]))
 					idxMinDist = i;
 
 				// pre-computation of angular speed
