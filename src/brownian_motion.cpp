@@ -515,8 +515,8 @@ void BrownianMotionNode::scanReceived_no_downsampling(const sensor_msgs::msg::La
 				cmd_vel.angular.z = MAX_ANGULAR_SPEED * wr;
 		}
 		else{
-			if (verbose && nsmalldist > 0) RCLCPP_INFO_STREAM(this->get_logger(),
-				"Lateral readings have a negligible difference");
+			//if (verbose && nsmalldist > 0) RCLCPP_INFO_STREAM(this->get_logger(),
+			//	"Lateral readings have a negligible difference");
 			if (pt->ranges[ifront] >= STOP_DIST_TH)
 			{ cmd_vel.angular.z = 0.0; }
 			else {
@@ -542,7 +542,7 @@ void BrownianMotionNode::scanReceived_no_downsampling(const sensor_msgs::msg::La
 				else cmd_vel.angular.z = MAX_ANGULAR_SPEED;
 			// keep current rotation speed until robot rotates about itself
 			double rndAng = (rand() % 201 - 100) / 10.0 / 180.0 * M_PI + M_PI; // random fluctuation of +/- 10 deg.
-			eT = this->get_clock()->now().seconds() + rndAng / MAX_ANGULAR_SPEED;
+			eT = this->get_clock()->now().seconds() + rndAng / MAX_ANGULAR_SPEED * 2.0;
 			recover = true;
 			nsinv = 0;
 			if (verbose)
@@ -550,11 +550,11 @@ void BrownianMotionNode::scanReceived_no_downsampling(const sensor_msgs::msg::La
 		}
 	}
 
-	if (verbose && !recover)
+	/*if (verbose && !recover)
 		RCLCPP_INFO_STREAM(this->get_logger(),
 			"(v, w) = (" << cmd_vel.linear.x << ", " << cmd_vel.angular.z << ") / d[ifront] = " <<
 			pt->ranges[ifront] << ", d[idxMinDist] = " << pt->ranges[idxMinDist] <<
-			" wl = " << wl << ", wr = " << wr << ", ifront = " << ifront << ", idxMinDist = " << idxMinDist);	
+			" wl = " << wl << ", wr = " << wr << ", ifront = " << ifront << ", idxMinDist = " << idxMinDist);*/
 
 	cmd_vel_pub->publish(cmd_vel);
 
