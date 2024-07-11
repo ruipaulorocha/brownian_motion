@@ -78,6 +78,8 @@ public:
 	void sonarReceived(const sensor_msgs::msg::PointCloud &ptref);
 	void scanReceived(const sensor_msgs::msg::LaserScan &ptref);
 	void scanReceived_no_downsampling(const sensor_msgs::msg::LaserScan &ptref);
+	rclcpp::Duration convertTime(double) const;
+	rclcpp::Duration motionTimePredict(double) const;
 };
 
 
@@ -201,12 +203,12 @@ void BrownianMotionNode::sonarReceived(const sensor_msgs::msg::PointCloud &ptref
 	float w1, w2, wl, wr; // left weight (wl) and right weight (wr)
 	static int nsinv; // number of consecutive signal inversions in angular velocity
 	float w_ = cmd_vel.angular.z; // previous angular velocity
-	static double eT;
+	static rclcpp::Time eT;
 	static bool recover = false; 
 	const bool mask[16] = {false, true, true, true, true, true, true, false, false, false, false, false, false, false, false, false};
 	
 	//if (recover && eT <= ros::Time::now().toSec())
-	if (recover && eT <= this->get_clock()->now().seconds() )
+	if (recover && eT <= this->get_clock()->now() )
 	{
 		recover = false; // finish recovery
 		//ROS_INFO("End of recovery rotation");
@@ -284,8 +286,7 @@ void BrownianMotionNode::sonarReceived(const sensor_msgs::msg::PointCloud &ptref
 					// keep current rotation speed until robot rotates PI
 					//eT = ros::Time::now().toSec() +
 					//	3.14159/MAX_ANGULAR_SPEED * 2.0;
-					eT = this->get_clock()->now().seconds() +
-						3.14159/MAX_ANGULAR_SPEED * 2.0;
+					eT = this->get_clock()->now() + this->motionTimePredict(M_PI);
 					recover = true;
 					nsinv = 0;
 				}
@@ -332,11 +333,11 @@ void BrownianMotionNode::scanReceived(const sensor_msgs::msg::LaserScan &ptref){
 	float w1, w2, wl, wr; // left weight (wl) and right weight (wr)
 	static int nsinv; // number of consecutive signal inversions in angular velocity
 	float w_ = cmd_vel.angular.z; // previous angular velocity
-	static double eT;
+	static rclcpp::Time eT;
 	static bool recover = false; 
 
 	//if (recover && eT <= ros::Time::now().toSec())
-	if (recover && eT <= this->get_clock()->now().seconds() )
+	if (recover && eT <= this->get_clock()->now() )
 	{
 		recover = false; // finish recovery
 		//ROS_INFO("End of recovery rotation");
@@ -423,8 +424,7 @@ void BrownianMotionNode::scanReceived(const sensor_msgs::msg::LaserScan &ptref){
 					// keep current rotation speed until robot rotates PI
 					//eT = ros::Time::now().toSec() +
 					//	3.14159/MAX_ANGULAR_SPEED * 2.0;
-					eT = this->get_clock()->now().seconds() +
-						3.14159/MAX_ANGULAR_SPEED * 2.0;
+					eT = this->get_clock()->now() + this->motionTimePredict(M_PI);
 					recover = true;
 					nsinv = 0;
 				}
@@ -460,10 +460,10 @@ void BrownianMotionNode::scanReceived_no_downsampling(const sensor_msgs::msg::La
 	static int nsinv;	// number of consecutive signal inversions in angular velocity
 	double w_ = cmd_vel.angular.z;	// previous angular velocity
 	double v_ = cmd_vel.linear.x;	// previous linear velocity
-	static double eT;
+	static rclcpp::Time eT;
 	static bool recover = false;
 
-	if (recover && eT <= this->get_clock()->now().seconds() )
+	if (recover && eT <= this->get_clock()->now() )
 	{
 		recover = false; // finish recovery
 		if (verbose) RCLCPP_INFO_STREAM(this->get_logger(),"End of recovery rotation");
@@ -528,8 +528,7 @@ void BrownianMotionNode::scanReceived_no_downsampling(const sensor_msgs::msg::La
 				if (nsinv > 1) {
 					RCLCPP_WARN_STREAM(this->get_logger(), "Deadlock detected!");
 					// keep current rotation speed until robot rotates PI
-					eT = this->get_clock()->now().seconds() +
-						3.14159/MAX_ANGULAR_SPEED;
+					eT = this->get_clock()->now() + this->motionTimePredict(M_PI);
 					recover = true;
 					nsinv = 0;
 				}
@@ -542,7 +541,7 @@ void BrownianMotionNode::scanReceived_no_downsampling(const sensor_msgs::msg::La
 				else cmd_vel.angular.z = MAX_ANGULAR_SPEED;
 			// keep current rotation speed until robot rotates about itself
 			double rndAng = (rand() % 201 - 100) / 10.0 / 180.0 * M_PI + M_PI; // random fluctuation of +/- 10 deg.
-			eT = this->get_clock()->now().seconds() + rndAng / MAX_ANGULAR_SPEED * 2.0;
+			eT = this->get_clock()->now() + this->motionTimePredict(rndAng);
 			recover = true;
 			nsinv = 0;
 			if (verbose)
@@ -561,7 +560,27 @@ void BrownianMotionNode::scanReceived_no_downsampling(const sensor_msgs::msg::La
 	rate->sleep(); 
 }
 
+rclcpp::Duration BrownianMotionNode::convertTime(double secs) const{
+	int s = (int) secs;
+	unsigned int ns = (unsigned int) ( (secs - ((double) s)) * 1e9);
+	return rclcpp::Duration(s, ns);
+}
 
+#define ANGACCEL 45.0
+rclcpp::Duration BrownianMotionNode::motionTimePredict(double angle) const{
+	double t;
+	double tacc = MAX_ANGULAR_SPEED / ANGACCEL; // acceleration time to maximum angular speed
+	double alpha_acc = 0.5 * ANGACCEL * pow(tacc, 2.0);
+	if (alpha_acc < angle){
+		double t2 = (angle - alpha_acc) / MAX_ANGULAR_SPEED;
+		t = tacc + t2;
+	}
+	else t = sqrt(angle * 0.5 / ANGACCEL);
+
+	//RCLCPP_INFO_STREAM(this->get_logger(), "Predicted time to rotate " << angle <<
+	//	" radians is " << t << " s");
+	return this->convertTime(t);
+}
 
 int main(int argc, char** argv){
   
