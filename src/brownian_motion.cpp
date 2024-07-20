@@ -460,7 +460,7 @@ void BrownianMotionNode::scanReceived_no_downsampling(const sensor_msgs::msg::La
 	static int nsinv;	// number of consecutive signal inversions in angular velocity
 	double w_ = cmd_vel.angular.z;	// previous angular velocity
 	double v_ = cmd_vel.linear.x;	// previous linear velocity
-	static rclcpp::Time eT;
+	static rclcpp::Time eT, t_;
 	static bool recover = false;
 
 	if (recover && eT <= this->get_clock()->now() )
@@ -468,6 +468,13 @@ void BrownianMotionNode::scanReceived_no_downsampling(const sensor_msgs::msg::La
 		recover = false; // finish recovery
 		if (verbose) RCLCPP_INFO_STREAM(this->get_logger(),"End of recovery rotation");
 	}
+
+	/*if (recover && verbose){
+		unsigned long int t_nsecs = (this->get_clock()->now() - t_ ).nanoseconds();
+		double delta_t = ((double) t_nsecs) * 1e-9;
+		double delta_t2 = (this->get_clock()->now() - t_ ).seconds();
+		RCLCPP_INFO_STREAM(this->get_logger(),"Recovery started " << delta_t << " / " << delta_t2 << " secs. ago");
+	}*/
 	
 	if (!recover){
 		idxMinDist = -1;
@@ -529,6 +536,7 @@ void BrownianMotionNode::scanReceived_no_downsampling(const sensor_msgs::msg::La
 					RCLCPP_WARN_STREAM(this->get_logger(), "Deadlock detected!");
 					// keep current rotation speed until robot rotates PI
 					eT = this->get_clock()->now() + this->motionTimePredict(M_PI);
+					t_ = this->get_clock()->now();
 					recover = true;
 					nsinv = 0;
 				}
@@ -542,6 +550,7 @@ void BrownianMotionNode::scanReceived_no_downsampling(const sensor_msgs::msg::La
 			// keep current rotation speed until robot rotates about itself
 			double rndAng = (rand() % 201 - 100) / 10.0 / 180.0 * M_PI + M_PI; // random fluctuation of +/- 10 deg.
 			eT = this->get_clock()->now() + this->motionTimePredict(rndAng);
+			t_ = this->get_clock()->now();
 			recover = true;
 			nsinv = 0;
 			if (verbose)

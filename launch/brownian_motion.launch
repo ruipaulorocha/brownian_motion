@@ -1,12 +1,15 @@
+<?xml version="1.0"?>
+
 <launch>
-  <arg name="max_linear_speed" default="0.25" />
-  <arg name="max_angular_speed" default="0.75" />
-  <arg name="safe_dist_th" default="0.75" />
-  <arg name="detour_obst_th" default="0.60" />
-  <arg name="stop_dist_th" default="0.40" />
-  <arg name="diff_th" default="0.1" />
+  <arg name="max_linear_speed" default="1.0" />
+  <arg name="max_angular_speed" default="1.571" />
+  <arg name="safe_dist_th" default="1.50" />
+  <arg name="detour_obst_th" default="1.40" />
+  <arg name="stop_dist_th" default="0.50" />
+  <arg name="diff_th" default="0.02" />
 	<arg name="verbose" default="False" />
 	<arg name="useLRF" default="True" />
+	<arg name="use_all_LRF_readings" default="True" />
   
   <node pkg="brownian_motion" exec="brownian_motion" name="brownian_motion" output="screen">
 		<param name="max_linear_speed" value="$(var max_linear_speed)" />
@@ -17,6 +20,7 @@
 		<param name="diff_th" value="$(var diff_th)" />
 		<param name="verbose" value="$(var verbose)" />
 		<param name="useLRF" value="$(var useLRF)" />
+		<param name="use_all_LRF_readings" value="$(var use_all_LRF_readings)" />
   </node>
 
 </launch>
