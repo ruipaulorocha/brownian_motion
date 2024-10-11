@@ -615,7 +615,19 @@ void BrownianMotionNode::scanReceived_no_downsampling(const sensor_msgs::msg::La
 				//if (verbose && nsmalldist > 0) RCLCPP_INFO_STREAM(this->get_logger(),
 				//	"Lateral readings have a negligible difference");
 				if (pt->ranges[ifront] >= STOP_DIST_TH)
-				{ cmd_vel.angular.z = 0.0; }
+				{
+					cmd_vel.angular.z = 0.0;
+					if (cmd_vel.linear.x == 0.0) {
+						double delta_yaw = BrownianMotionNode::rndAngle();
+						if (verbose) 
+							RCLCPP_INFO_STREAM(this->get_logger(),
+							"Zero speed situation detected: going to rotate the random angle "
+							<< delta_yaw * 180.0 / M_PI << " deg.");
+						recover = true;
+						eT = this->get_clock()->now() + this->motionTimePredict(delta_yaw);
+						cmd_vel.angular.z = (delta_yaw >= 0.0 ? MAX_ANGULAR_SPEED : -MAX_ANGULAR_SPEED);
+					}
+				}
 				else {
 					cmd_vel.linear.x = 0.0;
 					if (idxMinDist > ifront) cmd_vel.angular.z = -MAX_ANGULAR_SPEED;
@@ -633,7 +645,7 @@ void BrownianMotionNode::scanReceived_no_downsampling(const sensor_msgs::msg::La
 				}
 			}
 
-			if (cmd_vel.linear.x < MAX_LINEAR_SPEED*1e-2 && v_ < MAX_LINEAR_SPEED*1e-2 &&
+			if (!recover && cmd_vel.linear.x < MAX_LINEAR_SPEED*1e-2 && v_ < MAX_LINEAR_SPEED*1e-2 &&
 				fabs(cmd_vel.angular.z) < MAX_ANGULAR_SPEED*1e-2 && fabs(w_) < MAX_ANGULAR_SPEED*1e-2){
 				if (idxMinDist > ifront) cmd_vel.angular.z = -MAX_ANGULAR_SPEED;
 					else cmd_vel.angular.z = MAX_ANGULAR_SPEED;
