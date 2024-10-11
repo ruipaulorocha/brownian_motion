@@ -5,7 +5,7 @@
  »
  *  All rights reserved.
  * 
- *  Version 3.2.0, Jul. 7, 2024
+ *  Version 3.3.0, Oct. 7, 2024
  * 
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
@@ -41,6 +41,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+#include <chrono>
 
 //#include "ros/ros.h"
 #include <rclcpp/rclcpp.hpp>
@@ -68,18 +69,22 @@ private:
 	double DETOUR_OBST_TH;
 	double STOP_DIST_TH;
 	double DIFF_TH;
+	double YAW_TIMEOUT;
 	//int verbose;
 	bool verbose;
 	//int useLRF;
 	bool useLRF;
 	bool use_all_LRF_readings;
+	// private methods
+	rclcpp::Duration motionTimePredict(double) const;
 public:
 	BrownianMotionNode(rclcpp::Rate *);
 	void sonarReceived(const sensor_msgs::msg::PointCloud &ptref);
 	void scanReceived(const sensor_msgs::msg::LaserScan &ptref);
 	void scanReceived_no_downsampling(const sensor_msgs::msg::LaserScan &ptref);
-	rclcpp::Duration convertTime(double) const;
-	rclcpp::Duration motionTimePredict(double) const;
+	// static methods
+	static rclcpp::Duration convertTime(double);
+	static double rndAngle(void);
 };
 
 
@@ -93,6 +98,7 @@ BrownianMotionNode::BrownianMotionNode(rclcpp::Rate *r) : Node("brownian_motion"
 	this->declare_parameter<double>("detour_obst_th",		0.60);
 	this->declare_parameter<double>("stop_dist_th",			0.40);
 	this->declare_parameter<double>("diff_th",				0.02);
+	this->declare_parameter<double>("yaw_timeout",			10.0);
 	this->declare_parameter<bool>("verbose",				false);
 	this->declare_parameter<bool>("useLRF",					true);
 	this->declare_parameter<bool>("use_all_LRF_readings",	true);	
@@ -131,6 +137,10 @@ BrownianMotionNode::BrownianMotionNode(rclcpp::Rate *r) : Node("brownian_motion"
 	this->get_parameter("diff_th", DIFF_TH);
 	RCLCPP_INFO(this->get_logger(),"diff_th parameter set succesfully to %.3f",
 		DIFF_TH);
+
+	this->get_parameter("yaw_timeout", YAW_TIMEOUT);
+	RCLCPP_INFO(this->get_logger(),"yaw_timeout parameter set succesfully to %.3f",
+		YAW_TIMEOUT);
 
 	this->get_parameter("verbose", verbose);
 	RCLCPP_INFO(this->get_logger(),"verbose parameter set succesfully to %s",
@@ -173,7 +183,8 @@ BrownianMotionNode::BrownianMotionNode(rclcpp::Rate *r) : Node("brownian_motion"
 			laser_sub = this->create_subscription<sensor_msgs::msg::LaserScan>("scan", 10,
 				std::bind(&BrownianMotionNode::scanReceived, this, std::placeholders::_1));
  	else //sonars_sub  = n.subscribe<sensor_msgs::PointCloud>("sonar", 1, sonarReceived);
- 		sonars_sub = this->create_subscription<sensor_msgs::msg::PointCloud>("sonar", 10, std::bind(&BrownianMotionNode::sonarReceived, this, std::placeholders::_1));
+ 		sonars_sub = this->create_subscription<sensor_msgs::msg::PointCloud>("sonar", 10,
+ 				std::bind(&BrownianMotionNode::sonarReceived, this, std::placeholders::_1));
 
 	//cmd_vel_pub = n.advertise<geometry_msgs::Twist>("cmd_vel", 1);
  	cmd_vel_pub = this->create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 1);	
@@ -182,7 +193,22 @@ BrownianMotionNode::BrownianMotionNode(rclcpp::Rate *r) : Node("brownian_motion"
 	// if (useLRF) ROS_INFO("random_walk has been started (LRF)");
 	// else ROS_INFO("random_walk has been started (sonars)");
 
-	srand( (unsigned int) (this->get_clock()->now().seconds()*1e9) );
+	// initialize random number generator
+	 // srand( (unsigned int) (this->get_clock()->now().seconds()*1e9) );
+ 	/*double t = this->get_clock()->now().seconds();
+ 	unsigned int frac = (unsigned int ) ( (t - ((double) ((unsigned int) t))) * 1e9);
+	rclcpp::Time t = this->get_clock()->now();
+	unsigned int ns = (unsigned int) ( (double) t.nanoseconds() * 1e-3);
+	srand(ns);
+	srand(frac);
+	RCLCPP_INFO_STREAM(this->get_logger(),"random number generator seed set to " << frac << " " << t);*/
+
+	using namespace std::chrono;
+	system_clock::time_point tp = system_clock::now();
+  	system_clock::duration dtn = tp.time_since_epoch();
+  	unsigned int seed = dtn.count() % 10000000000; // get 10 less significant decimal digits
+  	RCLCPP_INFO_STREAM(this->get_logger(),"random number generator seed set to " << seed);
+  	srand(seed);
 
 	RCLCPP_INFO(this->get_logger(),"brownian_motion has been started (%s)",
 		(useLRF?"LRF":"sonars"));
@@ -204,7 +230,7 @@ void BrownianMotionNode::sonarReceived(const sensor_msgs::msg::PointCloud &ptref
 	static int nsinv; // number of consecutive signal inversions in angular velocity
 	float w_ = cmd_vel.angular.z; // previous angular velocity
 	static rclcpp::Time eT;
-	static bool recover = false; 
+	static bool recover = false, straight = false; 
 	const bool mask[16] = {false, true, true, true, true, true, true, false, false, false, false, false, false, false, false, false};
 	
 	//if (recover && eT <= ros::Time::now().toSec())
@@ -234,13 +260,36 @@ void BrownianMotionNode::sonarReceived(const sensor_msgs::msg::PointCloud &ptref
 		//if (verbose) ROS_INFO("%d : %f %d %d", i, d[i], a[i], f[i]);
 		if (verbose) RCLCPP_INFO(this->get_logger(), "%d : %f %d %d", i, d[i], a[i], f[i]);
 	}
-	if (!f[idxMinDist]) cmd_vel.linear.x = MAX_LINEAR_SPEED;
-	else if (d[idxMinDist] > STOP_DIST_TH)
+	if (!f[idxMinDist]) {
+		cmd_vel.linear.x = MAX_LINEAR_SPEED;
+		if (!straight) {
+			straight = true;
+			eT = this->get_clock()->now() + BrownianMotionNode::convertTime(this->YAW_TIMEOUT);
+		}
+		else if (eT <= this->get_clock()->now()){
+			straight = false;
+			double delta_yaw = BrownianMotionNode::rndAngle();
+			if (verbose) 
+				RCLCPP_INFO_STREAM(this->get_logger(),
+				"Straight motion timeout: yaw angle is going to be adjusted "
+				<< delta_yaw * 180.0 / M_PI << " deg.");
+			recover = true;
+			eT = this->get_clock()->now() + this->motionTimePredict(delta_yaw);
+			cmd_vel.linear.x = 0.0;
+			cmd_vel.angular.z = (delta_yaw >= 0.0 ? MAX_ANGULAR_SPEED : -MAX_ANGULAR_SPEED);
+		}
+	}
+	else{
+		straight = false;
+		if (d[idxMinDist] > STOP_DIST_TH)
 				cmd_vel.linear.x = MAX_LINEAR_SPEED *
 							(d[idxMinDist] - STOP_DIST_TH) / (SAFE_DIST_TH - STOP_DIST_TH);
-	else cmd_vel.linear.x = 0.0;
+		else cmd_vel.linear.x = 0.0;
+	}
 
 	// compute angular speed
+	if (!recover)
+	{
 	if (!f[idxMinDist]) cmd_vel.angular.z = 0.0;
 	else
 	{
@@ -294,6 +343,7 @@ void BrownianMotionNode::sonarReceived(const sensor_msgs::msg::PointCloud &ptref
 		}
 	}
 	}
+	}
 	free(d);
 	free(a);
 	free(f);
@@ -303,6 +353,7 @@ void BrownianMotionNode::sonarReceived(const sensor_msgs::msg::PointCloud &ptref
 			cmd_vel.linear.x, cmd_vel.angular.z, idxMinDist, wl, wr);
 	
 	//cmd_vel_pub.publish(cmd_vel);
+	w_ = cmd_vel.angular.z;
 	cmd_vel_pub->publish(cmd_vel);
 
 	//ros::Duration(0.1).sleep();
@@ -334,7 +385,7 @@ void BrownianMotionNode::scanReceived(const sensor_msgs::msg::LaserScan &ptref){
 	static int nsinv; // number of consecutive signal inversions in angular velocity
 	float w_ = cmd_vel.angular.z; // previous angular velocity
 	static rclcpp::Time eT;
-	static bool recover = false; 
+	static bool recover = false, straight = false; 
 
 	//if (recover && eT <= ros::Time::now().toSec())
 	if (recover && eT <= this->get_clock()->now() )
@@ -370,13 +421,36 @@ void BrownianMotionNode::scanReceived(const sensor_msgs::msg::LaserScan &ptref){
 		//if (verbose) ROS_INFO("%d (%d): %f %f (%.1f) %d %d", i, j, d[i], angle[i], angle[i]/PI2*90, a[i], f[i]);
 		if (verbose) RCLCPP_INFO(this->get_logger(), "%d (%d): %f %f (%.1f) %d %d", i, j, d[i], angle[i], angle[i]/PI2*90, a[i], f[i]);
 	}
-	if (!f[idxMinDist]) cmd_vel.linear.x = MAX_LINEAR_SPEED;
-	else if (d[idxMinDist] > STOP_DIST_TH)
+
+	if (!f[idxMinDist]) {
+		cmd_vel.linear.x = MAX_LINEAR_SPEED;
+		if (!straight) {
+			straight = true;
+			eT = this->get_clock()->now() + BrownianMotionNode::convertTime(this->YAW_TIMEOUT);
+		}
+		else if (eT <= this->get_clock()->now()){
+			straight = false;
+			double delta_yaw = BrownianMotionNode::rndAngle();
+			if (verbose) 
+				RCLCPP_INFO_STREAM(this->get_logger(),
+				"Straight motion timeout: yaw angle is going to be adjusted "
+				<< delta_yaw * 180.0 / M_PI << " deg.");
+			recover = true;
+			eT = this->get_clock()->now() + this->motionTimePredict(delta_yaw);
+			cmd_vel.linear.x = 0.0;
+			cmd_vel.angular.z = (delta_yaw >= 0.0 ? MAX_ANGULAR_SPEED : -MAX_ANGULAR_SPEED);
+		}
+	}
+	else {
+		straight = false;
+		if (d[idxMinDist] > STOP_DIST_TH)
 				cmd_vel.linear.x = MAX_LINEAR_SPEED *
 							(d[idxMinDist] - STOP_DIST_TH) / (SAFE_DIST_TH - STOP_DIST_TH);
-	else cmd_vel.linear.x = 0.0;
+		else cmd_vel.linear.x = 0.0;
+	}
 
 	// compute angular speed
+	if (!recover){
 	if (!f[idxMinDist]) cmd_vel.angular.z = 0.0;
 	else
 	{
@@ -432,6 +506,7 @@ void BrownianMotionNode::scanReceived(const sensor_msgs::msg::LaserScan &ptref){
 		}
 	}
 	}
+	}
 
 	if (verbose && !recover)
 		//ROS_INFO("(v, w) = (%f, %f) / d[ifront] = %f d[idxMinDist] = %f wl = %f wr = %f",
@@ -440,6 +515,7 @@ void BrownianMotionNode::scanReceived(const sensor_msgs::msg::LaserScan &ptref){
 			cmd_vel.linear.x, cmd_vel.angular.z, d[ifront], d[idxMinDist], wl, wr);	
 
 	//cmd_vel_pub.publish(cmd_vel);
+	w_ = cmd_vel.angular.z;
 	cmd_vel_pub->publish(cmd_vel);
 
 	//ros::Duration(0.1).sleep();
@@ -461,7 +537,7 @@ void BrownianMotionNode::scanReceived_no_downsampling(const sensor_msgs::msg::La
 	double w_ = cmd_vel.angular.z;	// previous angular velocity
 	double v_ = cmd_vel.linear.x;	// previous linear velocity
 	static rclcpp::Time eT, t_;
-	static bool recover = false;
+	static bool recover = false, straight = false;
 
 	if (recover && eT <= this->get_clock()->now() )
 	{
@@ -490,9 +566,12 @@ void BrownianMotionNode::scanReceived_no_downsampling(const sensor_msgs::msg::La
 				// pre-computation of angular speed
 				if (pt->ranges[i] < SAFE_DIST_TH){
 					++nsmalldist;
+					// we = (pt->ranges[i] <= DETOUR_OBST_TH ?
+					// 	0.0 + (1.0 - pt->ranges[i] / DETOUR_OBST_TH)
+					// 	: 0.0);
 					we = (pt->ranges[i] <= DETOUR_OBST_TH ?
-						0.0 + (1.0 - pt->ranges[i] / DETOUR_OBST_TH)
-						: 0.0);
+						1.0
+						: 0.0 + (1.0 - (pt->ranges[i] - DETOUR_OBST_TH ) / (SAFE_DIST_TH - DETOUR_OBST_TH ) ) );
 					if (i > ifront) wl += we; // reading is on the left of the robot
 					else if (i < ifront) wr += we;
 				}
@@ -501,60 +580,81 @@ void BrownianMotionNode::scanReceived_no_downsampling(const sensor_msgs::msg::La
 		}
 
 		// linear speed
-		if (pt->ranges[idxMinDist] >= SAFE_DIST_TH)
+		if (pt->ranges[idxMinDist] >= SAFE_DIST_TH){
 			cmd_vel.linear.x = MAX_LINEAR_SPEED;
-		else if (pt->ranges[idxMinDist] > STOP_DIST_TH)
-			cmd_vel.linear.x = MAX_LINEAR_SPEED *
-				(pt->ranges[idxMinDist] - STOP_DIST_TH) / (SAFE_DIST_TH - STOP_DIST_TH);
-		else cmd_vel.linear.x = 0.0;
-
-		// angular speed
-		if (nsmalldist > 0){
-			wl /= (1.0 * nsmalldist);
-			wr /= (1.0 * nsmalldist); 
-		}
-		if ((wl > DIFF_TH || wr > DIFF_TH) && (wl > wr + DIFF_TH || wl + DIFF_TH < wr))
-		{
-			nsinv = 0;
-			if (wl > wr + DIFF_TH ) // left obstacles have higher weight: rotate clockwise (towards negative angles)
-				cmd_vel.angular.z = - MAX_ANGULAR_SPEED * wl;
-			else if (wl + DIFF_TH < wr)  // right obstacles have higher weight: rotate anticlockwise (towards positive angles)
-				cmd_vel.angular.z = MAX_ANGULAR_SPEED * wr;
-		}
-		else{
-			//if (verbose && nsmalldist > 0) RCLCPP_INFO_STREAM(this->get_logger(),
-			//	"Lateral readings have a negligible difference");
-			if (pt->ranges[ifront] >= STOP_DIST_TH)
-			{ cmd_vel.angular.z = 0.0; }
-			else {
+			if (!straight) {
+				straight = true;
+				eT = this->get_clock()->now() + BrownianMotionNode::convertTime(this->YAW_TIMEOUT);
+			}
+			else if (eT <= this->get_clock()->now()){
+				straight = false;
+				double delta_yaw = BrownianMotionNode::rndAngle();
+				if (verbose) RCLCPP_INFO_STREAM(this->get_logger(),
+					"Straight motion timeout: yaw angle is going to be adjusted "
+					<< delta_yaw * 180.0 / M_PI << " deg.");
+				recover = true;
+				eT = this->get_clock()->now() + this->motionTimePredict(delta_yaw);
 				cmd_vel.linear.x = 0.0;
-				if (idxMinDist > ifront) cmd_vel.angular.z = -MAX_ANGULAR_SPEED;
-				else cmd_vel.angular.z = MAX_ANGULAR_SPEED;
-				// check if there was a signal inversion in angular velocity
-				if (cmd_vel.angular.z * w_ < 0.0) ++nsinv;
-				if (nsinv > 1) {
-					RCLCPP_WARN_STREAM(this->get_logger(), "Deadlock detected!");
-					// keep current rotation speed until robot rotates PI
-					eT = this->get_clock()->now() + this->motionTimePredict(M_PI);
-					t_ = this->get_clock()->now();
-					recover = true;
-					nsinv = 0;
-				}
+				cmd_vel.angular.z = (delta_yaw >= 0.0 ? MAX_ANGULAR_SPEED : -MAX_ANGULAR_SPEED);
 			}
 		}
+		else {
+			straight = false;
+			if (pt->ranges[idxMinDist] > STOP_DIST_TH)
+			cmd_vel.linear.x = MAX_LINEAR_SPEED *
+				(pt->ranges[idxMinDist] - STOP_DIST_TH) / (SAFE_DIST_TH - STOP_DIST_TH);
+			else cmd_vel.linear.x = 0.0;
+		}
 
-		if (cmd_vel.linear.x < MAX_LINEAR_SPEED*1e-2 && v_ < MAX_LINEAR_SPEED*1e-2 &&
-			fabs(cmd_vel.angular.z) < MAX_ANGULAR_SPEED*1e-2 && fabs(w_) < MAX_ANGULAR_SPEED*1e-2){
-			if (idxMinDist > ifront) cmd_vel.angular.z = -MAX_ANGULAR_SPEED;
-				else cmd_vel.angular.z = MAX_ANGULAR_SPEED;
-			// keep current rotation speed until robot rotates about itself
-			double rndAng = (rand() % 201 - 100) / 10.0 / 180.0 * M_PI + M_PI; // random fluctuation of +/- 10 deg.
-			eT = this->get_clock()->now() + this->motionTimePredict(rndAng);
-			t_ = this->get_clock()->now();
-			recover = true;
-			nsinv = 0;
-			if (verbose)
-				RCLCPP_WARN_STREAM(this->get_logger(), "Local minimum detected! Going to rotate " << rndAng << " radians");
+		// angular speed
+		if (!recover){
+			if (nsmalldist > 0){
+				wl /= (1.0 * nsmalldist);
+				wr /= (1.0 * nsmalldist); 
+			}
+			if ((wl > DIFF_TH || wr > DIFF_TH) && (wl > wr + DIFF_TH || wl + DIFF_TH < wr))
+			{
+				nsinv = 0;
+				if (wl > wr + DIFF_TH ) // left obstacles have higher weight: rotate clockwise (towards negative angles)
+					cmd_vel.angular.z = - MAX_ANGULAR_SPEED * wl;
+				else if (wl + DIFF_TH < wr)  // right obstacles have higher weight: rotate anticlockwise (towards positive angles)
+					cmd_vel.angular.z = MAX_ANGULAR_SPEED * wr;
+			}
+			else{
+				//if (verbose && nsmalldist > 0) RCLCPP_INFO_STREAM(this->get_logger(),
+				//	"Lateral readings have a negligible difference");
+				if (pt->ranges[ifront] >= STOP_DIST_TH)
+				{ cmd_vel.angular.z = 0.0; }
+				else {
+					cmd_vel.linear.x = 0.0;
+					if (idxMinDist > ifront) cmd_vel.angular.z = -MAX_ANGULAR_SPEED;
+					else cmd_vel.angular.z = MAX_ANGULAR_SPEED;
+					// check if there was a signal inversion in angular velocity
+					if (cmd_vel.angular.z * w_ < 0.0) ++nsinv;
+					if (nsinv > 1) {
+						RCLCPP_WARN_STREAM(this->get_logger(), "Deadlock detected!");
+						// keep current rotation speed until robot rotates PI
+						eT = this->get_clock()->now() + this->motionTimePredict(M_PI);
+						t_ = this->get_clock()->now();
+						recover = true;
+						nsinv = 0;
+					}
+				}
+			}
+
+			if (cmd_vel.linear.x < MAX_LINEAR_SPEED*1e-2 && v_ < MAX_LINEAR_SPEED*1e-2 &&
+				fabs(cmd_vel.angular.z) < MAX_ANGULAR_SPEED*1e-2 && fabs(w_) < MAX_ANGULAR_SPEED*1e-2){
+				if (idxMinDist > ifront) cmd_vel.angular.z = -MAX_ANGULAR_SPEED;
+					else cmd_vel.angular.z = MAX_ANGULAR_SPEED;
+				// keep current rotation speed until robot rotates about itself
+				double rndAng = (rand() % 201 - 100) / 10.0 / 180.0 * M_PI + M_PI; // random fluctuation of +/- 10 deg.
+				eT = this->get_clock()->now() + this->motionTimePredict(rndAng);
+				t_ = this->get_clock()->now();
+				recover = true;
+				nsinv = 0;
+				if (verbose)
+					RCLCPP_WARN_STREAM(this->get_logger(), "Local minimum detected! Going to rotate " << rndAng << " radians");
+			}
 		}
 	}
 
@@ -564,12 +664,14 @@ void BrownianMotionNode::scanReceived_no_downsampling(const sensor_msgs::msg::La
 			pt->ranges[ifront] << ", d[idxMinDist] = " << pt->ranges[idxMinDist] <<
 			" wl = " << wl << ", wr = " << wr << ", ifront = " << ifront << ", idxMinDist = " << idxMinDist);*/
 
+	v_ = cmd_vel.linear.x;
+	w_ = cmd_vel.angular.z;
 	cmd_vel_pub->publish(cmd_vel);
 
 	rate->sleep(); 
 }
 
-rclcpp::Duration BrownianMotionNode::convertTime(double secs) const{
+rclcpp::Duration BrownianMotionNode::convertTime(double secs){
 	int s = (int) secs;
 	unsigned int ns = (unsigned int) ( (secs - ((double) s)) * 1e9);
 	return rclcpp::Duration(s, ns);
@@ -580,6 +682,7 @@ rclcpp::Duration BrownianMotionNode::motionTimePredict(double angle) const{
 	double t;
 	double tacc = MAX_ANGULAR_SPEED / ANGACCEL; // acceleration time to maximum angular speed
 	double alpha_acc = 0.5 * ANGACCEL * pow(tacc, 2.0);
+	angle = fabs(angle); // the following calculations assume that angle >= 0.0
 	if (alpha_acc < angle){
 		double t2 = (angle - alpha_acc) / MAX_ANGULAR_SPEED;
 		t = tacc + t2;
@@ -588,14 +691,18 @@ rclcpp::Duration BrownianMotionNode::motionTimePredict(double angle) const{
 
 	//RCLCPP_INFO_STREAM(this->get_logger(), "Predicted time to rotate " << angle <<
 	//	" radians is " << t << " s");
-	return this->convertTime(t);
+	return BrownianMotionNode::convertTime(t);
+}
+
+double BrownianMotionNode::rndAngle(void){
+	int deg = (rand() % 361) - 180; // random angle between -180 and +180 deg.
+	return ((double) deg) / 180.0 * M_PI;
 }
 
 int main(int argc, char** argv){
   
 	//ros::init(argc, argv, "random_walk");
 	rclcpp::init(argc, argv);
-
 
 	//ros::NodeHandle n;
 	// ros::NodeHandle pn("~");

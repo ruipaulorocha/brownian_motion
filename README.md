@@ -7,6 +7,7 @@ The package `brownian_motion` contains a node that makes a wheeled robot executi
 - If obstacles are detected at a distance `d` such as `stop_dist_th < d <= safe_dist_th`, the robot's linear speed is reduced proportionally; it becomes zero for `d <= stop_dist_th`.
 - The angular speed is different from zero for `d < safe_dist_th` so that the robot turns to avoid the nearest obstacle; the robot's rotation is more agressive for `d <= detour_obst_th`; note that `detour_obst_th > stop_dist_th`.
 - The robot resumes straight motion at maximum speed after finding a direction free of obstacles.
+- The robot changes its direction when it has moved straight more than `ỳaw_timeout` seconds. The new direction is selected randomly.
 
 
 #### Nodes
@@ -36,8 +37,11 @@ The package `brownian_motion` contains a node that makes a wheeled robot executi
 - `stop_dist_th` (double, default: 0.40)
     - meter
 - `diff_th` (double, default: 0.02)
-    - minimum contribution of lateral objects to angular speed to not be considered negligible
+    - Minimum contribution of lateral objects to angular speed to not be considered negligible
     - radian/second
+- `yaw_timeout` (double, default: 10.0)
+    - Timeout before the robot chooses randomly a new direction to move when it has been moving straight
+    - seconds
 - `verbose` (boolean, default: false)
     - Display verbose logging messages
 - `useLRF` (boolean, default: true)
@@ -46,8 +50,8 @@ The package `brownian_motion` contains a node that makes a wheeled robot executi
     - If true, use all laser rangefinder data without downsampling. Downsampling potentially decreases computational cost but degrades navigation safety.
 
 ##### `c_brownian_motion`
-The node `c_brownian_motion` is identical to `brownian_motion`: same topics, parameter and  behavior.
+The node `c_brownian_motion` is identical to `brownian_motion`: same topics, same parameters but `yaw_timeout`, and similar behavior.
 
 The source code of `brownian_motion` uses C++ classes (which is more compliant with ROS2, especially in the node shutdown), whereas the source code of `c_brownian_motion` doesn't. The source code of the latter is therefore more similar to the original version developed for ROS Indigo distribution.
 
-The use of the node `brownian_motion` is _recommended_. The other node was included just for historic reasons.
+The use of the node `brownian_motion` is _recommended_. The other node is included just for historic reasons.
