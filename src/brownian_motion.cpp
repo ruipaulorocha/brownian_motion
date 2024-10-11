@@ -194,15 +194,6 @@ BrownianMotionNode::BrownianMotionNode(rclcpp::Rate *r) : Node("brownian_motion"
 	// else ROS_INFO("random_walk has been started (sonars)");
 
 	// initialize random number generator
-	 // srand( (unsigned int) (this->get_clock()->now().seconds()*1e9) );
- 	/*double t = this->get_clock()->now().seconds();
- 	unsigned int frac = (unsigned int ) ( (t - ((double) ((unsigned int) t))) * 1e9);
-	rclcpp::Time t = this->get_clock()->now();
-	unsigned int ns = (unsigned int) ( (double) t.nanoseconds() * 1e-3);
-	srand(ns);
-	srand(frac);
-	RCLCPP_INFO_STREAM(this->get_logger(),"random number generator seed set to " << frac << " " << t);*/
-
 	using namespace std::chrono;
 	system_clock::time_point tp = system_clock::now();
   	system_clock::duration dtn = tp.time_since_epoch();
