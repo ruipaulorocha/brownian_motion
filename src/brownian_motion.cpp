@@ -57,7 +57,6 @@ float Euclidist(float x, float y)
 
 class BrownianMotionNode : public rclcpp::Node{
 private:
-	rclcpp::Rate *rate;
 	rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub;
 	rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr laser_sub;
 	rclcpp::Subscription<sensor_msgs::msg::PointCloud>::SharedPtr sonars_sub;
@@ -78,7 +77,7 @@ private:
 	// private methods
 	rclcpp::Duration motionTimePredict(double) const;
 public:
-	BrownianMotionNode(rclcpp::Rate *);
+	BrownianMotionNode();
 	void sonarReceived(const sensor_msgs::msg::PointCloud &ptref);
 	void scanReceived(const sensor_msgs::msg::LaserScan &ptref);
 	void scanReceived_no_downsampling(const sensor_msgs::msg::LaserScan &ptref);
@@ -88,8 +87,7 @@ public:
 };
 
 
-BrownianMotionNode::BrownianMotionNode(rclcpp::Rate *r) : Node("brownian_motion"){
-	rate = r;
+BrownianMotionNode::BrownianMotionNode() : Node("brownian_motion"){
 
 	// declare parameters
 	this->declare_parameter<double>("max_linear_speed",		0.20);
@@ -346,9 +344,6 @@ void BrownianMotionNode::sonarReceived(const sensor_msgs::msg::PointCloud &ptref
 	//cmd_vel_pub.publish(cmd_vel);
 	w_ = cmd_vel.angular.z;
 	cmd_vel_pub->publish(cmd_vel);
-
-	//ros::Duration(0.1).sleep();
-	rate->sleep(); 
 }
 
 #define PI2	1.5707963268
@@ -508,9 +503,6 @@ void BrownianMotionNode::scanReceived(const sensor_msgs::msg::LaserScan &ptref){
 	//cmd_vel_pub.publish(cmd_vel);
 	w_ = cmd_vel.angular.z;
 	cmd_vel_pub->publish(cmd_vel);
-
-	//ros::Duration(0.1).sleep();
-	rate->sleep(); 
 }
 
 
@@ -670,8 +662,6 @@ void BrownianMotionNode::scanReceived_no_downsampling(const sensor_msgs::msg::La
 	v_ = cmd_vel.linear.x;
 	w_ = cmd_vel.angular.z;
 	cmd_vel_pub->publish(cmd_vel);
-
-	rate->sleep(); 
 }
 
 rclcpp::Duration BrownianMotionNode::convertTime(double secs){
@@ -711,11 +701,19 @@ int main(int argc, char** argv){
 	// ros::NodeHandle pn("~");
 	// ros::Rate loop_rate(1); //1 Hz  
 
-	rclcpp::Rate loop_rate(10.0);
-	std::shared_ptr<rclcpp::Node> node = std::make_shared<BrownianMotionNode>(&loop_rate);
+	rclcpp::Rate rate(20.0); // loop rate = 20 Hz
+	std::shared_ptr<rclcpp::Node> node = std::make_shared<BrownianMotionNode>();
 
-	//ros::spin();	//trigger callbacks and prevents exiting
-	rclcpp::spin(node->get_node_base_interface()); //trigger callbacks and prevents exiting
+	// spin without controlling explicitly in main() the execution loop
+	//rclcpp::spin(node->get_node_base_interface()); //trigger callbacks and prevents exiting
+	while (rclcpp::ok()){
+		// do some job on each iteration...
+
+		// spin
+		rclcpp::spin_some(node);
+		// sleep to achieve desired rate
+		rate.sleep(); 
+	}
 
 	rclcpp::shutdown();
 
