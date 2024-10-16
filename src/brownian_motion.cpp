@@ -527,6 +527,7 @@ void BrownianMotionNode::scanReceived_no_downsampling(const sensor_msgs::msg::La
 		recover = false; // finish recovery
 		if (verbose) RCLCPP_INFO_STREAM(this->get_logger(),"End of recovery rotation");
 	}
+	else if (recover && verbose) RCLCPP_INFO_STREAM(this->get_logger(), "delta_t = " << (eT - this->get_clock()->now()).seconds() );
 
 	/*if (recover && verbose){
 		unsigned long int t_nsecs = (this->get_clock()->now() - t_ ).nanoseconds();
@@ -682,8 +683,8 @@ rclcpp::Duration BrownianMotionNode::motionTimePredict(double angle) const{
 	}
 	else t = sqrt(angle * 0.5 / ANGACCEL);
 
-	//RCLCPP_INFO_STREAM(this->get_logger(), "Predicted time to rotate " << angle <<
-	//	" radians is " << t << " s");
+	if (verbose) RCLCPP_INFO_STREAM(this->get_logger(), "Predicted time to rotate " << angle <<
+		" radians is " << t << " s");
 	return BrownianMotionNode::convertTime(t);
 }
 
