@@ -185,7 +185,7 @@ BrownianMotionNode::BrownianMotionNode() : Node("brownian_motion"){
  				std::bind(&BrownianMotionNode::sonarReceived, this, std::placeholders::_1));
 
 	//cmd_vel_pub = n.advertise<geometry_msgs::Twist>("cmd_vel", 1);
- 	cmd_vel_pub = this->create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 1);	
+ 	cmd_vel_pub = this->create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 1);
 
 
 	// if (useLRF) ROS_INFO("random_walk has been started (LRF)");
